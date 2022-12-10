@@ -569,7 +569,7 @@ void* DynamicGraphManager::dynamic_graph_real_time_loop()
 
 void DynamicGraphManager::hw_trigger()
 {
-    std::unique_lock<std::mutex> u1(trigger_mutex_);
+    std::unique_lock<std::mutex> lock(trigger_mutex_);
     hw_triggered_ = true;
     trigger_cv_.notify_all();
 }
@@ -577,7 +577,8 @@ void DynamicGraphManager::hw_trigger()
 void DynamicGraphManager::wait_for_control()
 {
     std::unique_lock<std::mutex> u1(control_rdy_mutex_);
-    control_cv_.wait_for(u1, std::chrono::milliseconds(200), []{return control_ready_;});
+    // control_cv_.wait_for(u1, std::chrono::milliseconds(200), []{return control_ready_;});
+    control_cv_.wait(u1, []{return control_ready_;});
     control_ready_=false;
 }
 
@@ -585,6 +586,8 @@ void* DynamicGraphManager::hardware_communication_real_time_loop()
 {
     // we acquiere the lock on the condition variable here
     cond_var_->lock_scope();
+    
+
 
     // some basic checks
     assert(!is_hardware_communication_stopped_ && "The loop is started");
@@ -609,14 +612,15 @@ void* DynamicGraphManager::hardware_communication_real_time_loop()
     // we start the main loop
     rt_printf("HARDWARE: Start loop \n");
     hwc_mutex_.lock();
+    std::unique_lock<std::mutex> lock(trigger_mutex_);
+
     while (!is_hardware_communication_stopped() && ros_ok())
     {
-        std::unique_lock<std::mutex> u1(trigger_mutex_);
 
         // Wait for the trigger from the hardware if time management is managed by it
         if (timer_triggered_ == false)
         {
-            trigger_cv_.wait_for(u1,std::chrono::milliseconds(200), []{return hw_triggered_;});
+            trigger_cv_.wait_for(lock, std::chrono::milliseconds(200), []{return hw_triggered_;});
             hw_triggered_=false;
         }
 
@@ -665,11 +669,9 @@ void* DynamicGraphManager::hardware_communication_real_time_loop()
         // rt_printf("HARDWARE: Sleep. \n");
         hwc_sleep_timer_.tic();
         hwc_mutex_.unlock();
-        // is time management handled by DGM or the hardware?
-        if (timer_triggered_)
-            hwc_spinner_.wait();
-        
+        // wait for the control loop duration for the computation to be completed (it should be a bit smaller that the control loop frequency)
         hwc_spinner_.wait();
+        
         hwc_mutex_.lock();
         hwc_sleep_timer_.tac();
 
@@ -720,6 +722,8 @@ void* DynamicGraphManager::hardware_communication_real_time_loop()
         {
             // send the command to the motors
             set_motor_controls_from_map(motor_controls_map_);
+            control_ready_ = true;
+            control_cv_.notify_all(); //Notify the control conditional variable to release the hw thread who's waiting for the condition
         }
     }
     // We use this function here because the loop might stop because of ROS
