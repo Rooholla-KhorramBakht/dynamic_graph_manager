@@ -23,6 +23,8 @@ device:
 
 # Hardware communication process
 hardware_communication:
+  # Use a software timer to run control loop or use the hardware
+  timer_triggered: false
   maximum_time_for_user_cmd: 100000
   max_missed_control: 10
   control_period: 1000000

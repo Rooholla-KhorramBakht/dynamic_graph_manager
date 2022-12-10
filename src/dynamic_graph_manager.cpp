@@ -31,6 +31,10 @@ const std::string DynamicGraphManager::motor_controls_map_name_ =
 const std::string DynamicGraphManager::shared_memory_name_ = "DGM_ShM";
 const std::string DynamicGraphManager::cond_var_name_ = "cond_var";
 
+// bool variables that are set and checked by the hardware when time management is done by it
+bool hw_triggered_ = false;
+bool control_ready_ = false;
+
 DynamicGraphManager::DynamicGraphManager()
 {
     shared_memory::clear_shared_memory("dgm_shm_name");
@@ -175,6 +179,17 @@ void DynamicGraphManager::initialize(YAML::Node param)
         std::cerr << e.what() << std::endl;
         throw ExceptionYamlCpp(ExceptionYamlCpp::PARSING_DOUBLE,
                                error_str + "maximum_time_for_user_cmd");
+    }
+    
+    try
+    {
+        timer_triggered_ =
+            params_["hardware_communication"]["timer_triggered"].as<bool>();
+    }
+    catch (std::exception& e)
+    {
+        std::cout << "timer_triggered not defined in YAML! Default software timer is chosen." << std::endl;
+        timer_triggered_ = true;
     }
 
     log_dir_ = real_time_tools::get_log_dir("dynamic_graph_manager");
@@ -552,6 +567,20 @@ void* DynamicGraphManager::dynamic_graph_real_time_loop()
     return THREAD_FUNCTION_RETURN_VALUE;
 }
 
+void DynamicGraphManager::hw_trigger()
+{
+    std::unique_lock<std::mutex> u1(trigger_mutex_);
+    hw_triggered_ = true;
+    trigger_cv_.notify_all();
+}
+
+void DynamicGraphManager::wait_for_control()
+{
+    std::unique_lock<std::mutex> u1(control_rdy_mutex_);
+    control_cv_.wait_for(u1, std::chrono::milliseconds(200), []{return control_ready_;});
+    control_ready_=false;
+}
+
 void* DynamicGraphManager::hardware_communication_real_time_loop()
 {
     // we acquiere the lock on the condition variable here
@@ -582,6 +611,15 @@ void* DynamicGraphManager::hardware_communication_real_time_loop()
     hwc_mutex_.lock();
     while (!is_hardware_communication_stopped() && ros_ok())
     {
+        std::unique_lock<std::mutex> u1(trigger_mutex_);
+
+        // Wait for the trigger from the hardware if time management is managed by it
+        if (timer_triggered_ == false)
+        {
+            trigger_cv_.wait_for(u1,std::chrono::milliseconds(200), []{return hw_triggered_;});
+            hw_triggered_=false;
+        }
+
         // rt_printf("HARDWARE: Call the sensors. \n");
         if (!is_hardware_communication_stopped() && ros_ok())
         {
@@ -627,6 +665,10 @@ void* DynamicGraphManager::hardware_communication_real_time_loop()
         // rt_printf("HARDWARE: Sleep. \n");
         hwc_sleep_timer_.tic();
         hwc_mutex_.unlock();
+        // is time management handled by DGM or the hardware?
+        if (timer_triggered_)
+            hwc_spinner_.wait();
+        
         hwc_spinner_.wait();
         hwc_mutex_.lock();
         hwc_sleep_timer_.tac();

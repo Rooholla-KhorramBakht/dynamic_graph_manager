@@ -117,6 +117,14 @@ public:
     void run();
 
     /**
+     * @brief hw_trigger() is called by robot hardware to trigger the a new iteration of the dgm.
+     */
+    void hw_trigger();
+    /**
+     * @brief wait_for_control() is used by robot hardware to wait for the computation of the DGM to be completed. It times out in 200ms.
+     */
+    void wait_for_control();
+    /**
      * @brief wait_start_dynamic_graph put the current thread to sleep until the
      * user start the dynamic graph
      */
@@ -786,6 +794,21 @@ protected:
     YAML::Node params_;
 
     std::mutex hwc_mutex_;
+    
+    /**
+     * @brief Mutexes and conditional variables used for applications where 
+     * the hardware manages the loop time of the DGM. trigger_mutex_ and trigger_cv_
+     * are used to trigger loading the sensor values to the graph and control_rdy_mutex_ and control_cv_
+     * are used to let the hardware know when the control command is computed and is ready to be sent.
+     */
+    std::mutex trigger_mutex_, control_rdy_mutex_;
+    std::condition_variable trigger_cv_, control_cv_;
+    /**
+     * @brief timer_triggered_ determins the scheme of control loop time management.
+     * if set to true, a software timer is used to trigger new loop executions and if set 
+     * to false, the signal is received from the hardware callback loop
+     */
+    bool timer_triggered_;
 };
 
 }  // namespace dynamic_graph_manager
