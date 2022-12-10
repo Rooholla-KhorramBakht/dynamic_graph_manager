@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "condition_variable": "cpp",
+        "deque": "cpp",
+        "string": "cpp",
+        "vector": "cpp",
+        "chrono": "cpp",
+        "mutex": "cpp"
+    }
+}
